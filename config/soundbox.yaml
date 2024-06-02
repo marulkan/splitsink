@@ -9,4 +9,6 @@ zones:
 # - name: Bathroom
 #   id: alsa_output.usb-Antlion_Audio_Antlion_USB_adapter_20180707-00.4.analog-stereo
 
-default_sink: Soundbox Output
+default_sink: SoundboxOutput
+sinks:
+- SoundboxOutput

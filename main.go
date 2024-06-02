@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 )
@@ -13,7 +15,8 @@ type config struct {
 		Name string
 		Id   string
 	}
-	Sink string `yaml:"default_sink"`
+	DefaultSink string `yaml:"default_sink"`
+	Sinks       []string
 }
 
 func readConf(filename string) (*config, error) {
@@ -32,7 +35,7 @@ func readConf(filename string) (*config, error) {
 }
 
 // Create a sink which we can add and remove devices from.
-func setup(sink string) {
+func createSink(sink string) {
 	// This whole function should be cleaned up. Probably ways to do this a thousand times better.
 	adapter := fmt.Sprintf("'{ factory.name=support.null-audio-sink node.name=\"%s\" node.description=\"%s\" media.class=Audio/Sink object.linger=true audio.position=[FL FR] }'", sink, sink)
 	// Need a shell for some reason...
@@ -41,16 +44,85 @@ func setup(sink string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
 
+func setDefaultSink(sink string) {
 	wpctl := exec.Command("bash", "-c", fmt.Sprintf("wpctl set-default `wpctl status | grep \"\\. %s\" | cut -c10-14 | egrep -o '[0-9]*'`", sink))
-	err = wpctl.Run()
+	err := wpctl.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-// FIXME: should be defered to so we don't end up with multiple sinks.
-func tearDown(sink string) {}
+func tearDown(sink string) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-cli destroy `wpctl status | grep \"\\. %s\" | cut -c10-14 | egrep -o '[0-9]*'`", sink))
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func addZoneToSink(zone string, sink string) {
+	fmt.Printf("addZoneToSink zone: %s, sink: %s", zone, sink)
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FL\" %s:playback_FL", zone, sink))
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FR\" %s:playback_FR", zone, sink))
+	err = cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func removeZoneFromSink(zone string, sink string) {
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FL\" %s:playback_FL", zone, sink))
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FR\" %s:playback_FR", zone, sink))
+	err = cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func webserver(conf *config) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/remove/{sink}/{zone}", func(w http.ResponseWriter, r *http.Request) {
+		for _, sink := range conf.Sinks {
+			if sink == r.PathValue("sink") {
+				for _, zone := range conf.Zones {
+					if zone.Name == r.PathValue("zone") {
+						removeZoneFromSink(zone.Id, sink)
+					}
+				}
+			}
+		}
+	})
+	mux.HandleFunc("GET /api/add/{sink}/{zone}", func(w http.ResponseWriter, r *http.Request) {
+		for _, sink := range conf.Sinks {
+			if sink == r.PathValue("sink") {
+				for _, zone := range conf.Zones {
+					if zone.Name == r.PathValue("zone") {
+						addZoneToSink(zone.Id, sink)
+					}
+				}
+			}
+		}
+	})
+	mux.HandleFunc("GET /api/sinks", func(w http.ResponseWriter, r *http.Request) {
+		s, _ := json.Marshal(conf.Sinks)
+		fmt.Fprint(w, string(s))
+	})
+	mux.HandleFunc("GET /api/zones", func(w http.ResponseWriter, r *http.Request) {
+		z, _ := json.Marshal(conf.Zones)
+		fmt.Fprint(w, string(z))
+	})
+	http.ListenAndServe("localhost:8090", mux)
+}
 
 func main() {
 	conf, err := readConf("config/soundbox.yaml")
@@ -58,11 +130,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	for _, zone := range conf.Zones {
-		fmt.Println(zone.Name)
-	}
-	fmt.Println(conf.Sink)
+	// for _, zone := range conf.Zones {
+	// 	fmt.Println(zone.Name)
+	// }
 
-	setup(conf.Sink)
+	for _, sink := range conf.Sinks {
+		defer tearDown(sink)
+		createSink(sink)
+	}
+	setDefaultSink(conf.DefaultSink)
+
+	webserver(conf)
 
 }
