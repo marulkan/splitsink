@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 type config struct {
@@ -17,6 +19,22 @@ type config struct {
 	}
 	DefaultSink string `yaml:"default_sink"`
 	Sinks       []string
+}
+
+type Sink struct {
+	Name  string
+	Zones []struct {
+		Name string
+		Id   string
+	}
+}
+
+type page struct {
+	Zones []struct {
+		Name string
+		Id   string
+	}
+	Sinks []string
 }
 
 func readConf(filename string) (*config, error) {
@@ -89,6 +107,34 @@ func removeZoneFromSink(zone string, sink string) {
 	}
 }
 
+func listZonesInSinks(conf *config) []Sink {
+	var r []Sink
+	for _, sink := range conf.Sinks {
+		var zones []struct {
+			Name string
+			Id   string
+		}
+		// out, err := exec.Command("bash", "-c", fmt.Sprintf("pw-link -l \"%s:monitor_FL\" | grep \"|->\" | awk '{ print $2 }' | awk -F':' '{ print $1 }'", sink)).Output()
+		out, err := exec.Command("bash", "-c", "cat out.file").Output()
+		if err != nil {
+			log.Fatal(err)
+		}
+		links := strings.Split(string(out), "\n")
+		for _, zone := range conf.Zones {
+			for _, link := range links {
+				if zone.Id == link {
+					zones = append(zones, struct {
+						Name string
+						Id   string
+					}{Name: zone.Name, Id: zone.Id})
+				}
+			}
+		}
+		r = append(r, Sink{Name: sink, Zones: zones})
+	}
+	return r
+}
+
 func webserver(conf *config) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/remove/{sink}/{zone}", func(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +159,10 @@ func webserver(conf *config) {
 			}
 		}
 	})
+	mux.HandleFunc("GET /api/list", func(w http.ResponseWriter, r *http.Request) {
+		s, _ := json.Marshal(listZonesInSinks(conf))
+		fmt.Fprint(w, string(s))
+	})
 	mux.HandleFunc("GET /api/sinks", func(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(conf.Sinks)
 		fmt.Fprint(w, string(s))
@@ -120,6 +170,15 @@ func webserver(conf *config) {
 	mux.HandleFunc("GET /api/zones", func(w http.ResponseWriter, r *http.Request) {
 		z, _ := json.Marshal(conf.Zones)
 		fmt.Fprint(w, string(z))
+	})
+	mux.HandleFunc("/index", func(w http.ResponseWriter, r *http.Request) {
+		// s, _ := json.Marshal(conf.Sinks)
+		p := &page{Sinks: conf.Sinks, Zones: conf.Zones}
+		t, err := template.ParseFiles("templates/index.html")
+		if err != nil {
+			log.Fatal(err)
+		}
+		t.Execute(w, p)
 	})
 	http.ListenAndServe("localhost:8090", mux)
 }
@@ -134,11 +193,12 @@ func main() {
 	// 	fmt.Println(zone.Name)
 	// }
 
-	for _, sink := range conf.Sinks {
-		defer tearDown(sink)
-		createSink(sink)
-	}
-	setDefaultSink(conf.DefaultSink)
+	// Disabled while fixing the webserver.
+	// for _, sink := range conf.Sinks {
+	// 	defer tearDown(sink)
+	// 	createSink(sink)
+	// }
+	// setDefaultSink(conf.DefaultSink)
 
 	webserver(conf)
 
