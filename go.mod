@@ -1,5 +1,5 @@
-module github.com/marulkan/soundbox
+module github.com/marulkan/splitsink
 
 go 1.22.3
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require gopkg.in/yaml.v3 v3.0.1
