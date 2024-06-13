@@ -82,12 +82,12 @@ func tearDown(sink string) {
 
 func addZoneToSink(zone string, sink string) {
 	fmt.Printf("addZoneToSink zone: %s, sink: %s", zone, sink)
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FL\" %s:playback_FL", zone, sink))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FL\" %s:playback_FL", sink, zone))
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FR\" %s:playback_FR", zone, sink))
+	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FR\" %s:playback_FR", sink, zone))
 	err = cmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -95,12 +95,12 @@ func addZoneToSink(zone string, sink string) {
 }
 
 func removeZoneFromSink(zone string, sink string) {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FL\" %s:playback_FL", zone, sink))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FL\" %s:playback_FL", sink, zone))
 	err := cmd.Run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FR\" %s:playback_FR", zone, sink))
+	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FR\" %s:playback_FR", sink, zone))
 	err = cmd.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -114,8 +114,8 @@ func listZonesInSinks(conf *config) []Sink {
 			Name string
 			Id   string
 		}
-		// out, err := exec.Command("bash", "-c", fmt.Sprintf("pw-link -l \"%s:monitor_FL\" | grep \"|->\" | awk '{ print $2 }' | awk -F':' '{ print $1 }'", sink)).Output()
-		out, err := exec.Command("bash", "-c", "cat out.file").Output()
+		out, err := exec.Command("bash", "-c", fmt.Sprintf("pw-link -l \"%s:monitor_FL\" | grep \"|->\" | awk '{ print $2 }' | awk -F':' '{ print $1 }'", sink)).Output()
+		//out, err := exec.Command("bash", "-c", "cat out.file").Output()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -180,26 +180,24 @@ func webserver(conf *config) {
 		}
 		t.Execute(w, p)
 	})
-	http.ListenAndServe("localhost:8090", mux)
+	http.ListenAndServe("0.0.0.0:8090", mux)
 }
 
 func main() {
-	conf, err := readConf("config/soundbox.yaml")
+	conf, err := readConf("/etc/splitsink/config.yaml")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// for _, zone := range conf.Zones {
-	// 	fmt.Println(zone.Name)
-	// }
+	for _, zone := range conf.Zones {
+		fmt.Println(zone.Name)
+	}
 
-	// Disabled while fixing the webserver.
-	// for _, sink := range conf.Sinks {
-	// 	defer tearDown(sink)
-	// 	createSink(sink)
-	// }
-	// setDefaultSink(conf.DefaultSink)
+	for _, sink := range conf.Sinks {
+		defer tearDown(sink)
+		createSink(sink)
+	}
+	setDefaultSink(conf.DefaultSink)
 
 	webserver(conf)
-
 }
