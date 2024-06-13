@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 	"html/template"
 	"log"
@@ -19,6 +20,10 @@ type config struct {
 	}
 	DefaultSink string `yaml:"default_sink"`
 	Sinks       []string
+	Webserver   struct {
+		Ip   string
+		Port string
+	}
 }
 
 type Sink struct {
@@ -37,16 +42,20 @@ type page struct {
 	Sinks []string
 }
 
-func readConf(filename string) (*config, error) {
-	buf, err := os.ReadFile(filename)
+func readConf() (*config, error) {
+	cfgFile, err := xdg.ConfigFile("splitsink/config.yaml")
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
+	}
+	buf, err := os.ReadFile(cfgFile)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	c := &config{}
 	err = yaml.Unmarshal(buf, c)
 	if err != nil {
-		return nil, fmt.Errorf("in file %q: %w", filename, err)
+		return nil, fmt.Errorf("in file %q: %w", cfgFile, err)
 	}
 
 	return c, err
@@ -60,7 +69,7 @@ func createSink(sink string) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-cli create-node adapter %s", adapter))
 	err := cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 }
 
@@ -68,7 +77,7 @@ func setDefaultSink(sink string) {
 	wpctl := exec.Command("bash", "-c", fmt.Sprintf("wpctl set-default `wpctl status | grep \"\\. %s\" | cut -c10-14 | egrep -o '[0-9]*'`", sink))
 	err := wpctl.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 }
 
@@ -76,7 +85,7 @@ func tearDown(sink string) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-cli destroy `wpctl status | grep \"\\. %s\" | cut -c10-14 | egrep -o '[0-9]*'`", sink))
 	err := cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 }
 
@@ -85,12 +94,12 @@ func addZoneToSink(zone string, sink string) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FL\" %s:playback_FL", sink, zone))
 	err := cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link \"%s:monitor_FR\" %s:playback_FR", sink, zone))
 	err = cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 }
 
@@ -98,12 +107,12 @@ func removeZoneFromSink(zone string, sink string) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FL\" %s:playback_FL", sink, zone))
 	err := cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	cmd = exec.Command("bash", "-c", fmt.Sprintf("pw-link -d \"%s:monitor_FR\" %s:playback_FR", sink, zone))
 	err = cmd.Run()
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 }
 
@@ -117,7 +126,7 @@ func listZonesInSinks(conf *config) []Sink {
 		out, err := exec.Command("bash", "-c", fmt.Sprintf("pw-link -l \"%s:monitor_FL\" | grep \"|->\" | awk '{ print $2 }' | awk -F':' '{ print $1 }'", sink)).Output()
 		//out, err := exec.Command("bash", "-c", "cat out.file").Output()
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 		links := strings.Split(string(out), "\n")
 		for _, zone := range conf.Zones {
@@ -176,15 +185,16 @@ func webserver(conf *config) {
 		p := &page{Sinks: conf.Sinks, Zones: conf.Zones}
 		t, err := template.ParseFiles("templates/index.html")
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 		t.Execute(w, p)
 	})
-	http.ListenAndServe("0.0.0.0:8090", mux)
+	url := fmt.Sprintf("%s:%s", conf.Webserver.Ip, conf.Webserver.Port)
+	http.ListenAndServe(url, mux)
 }
 
 func main() {
-	conf, err := readConf("/etc/splitsink/config.yaml")
+	conf, err := readConf()
 	if err != nil {
 		log.Fatal(err)
 	}
